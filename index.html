@@ -118,6 +118,41 @@
   }
   .choice4-btn:active{ transform: scale(.96); }
 
+  /* writing mode */
+  .writing-prompt{ font-size: 22px; color: var(--ink-soft); font-weight:700; min-height: 26px; }
+  .writing-prompt b{ color: var(--ink); font-size: 30px; }
+  .canvas-wrap{
+    position: relative; width: 300px; height: 300px; background: var(--card);
+    border-radius: 20px; box-shadow: 0 3px 0 var(--paper-line); overflow:hidden;
+  }
+  .canvas-wrap::before, .canvas-wrap::after{
+    content:''; position:absolute; background: var(--paper-line); pointer-events:none; z-index:1;
+  }
+  .canvas-wrap::before{ left:50%; top:0; bottom:0; width:1px; transform: translateX(-.5px); }
+  .canvas-wrap::after{ top:50%; left:0; right:0; height:1px; transform: translateY(-.5px); }
+  .trace-guide{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    font-size: 240px; font-weight:800; color: rgba(29,43,58,.12); z-index:1; pointer-events:none;
+    line-height:1;
+  }
+  #writeCanvas{ position:absolute; inset:0; width:100%; height:100%; touch-action:none; z-index:2; }
+  .clear-btn{
+    position:absolute; bottom:10px; right:10px; z-index:3;
+    padding: 8px 14px; border-radius: 10px; border: 2px solid var(--paper-line);
+    background: #fff; font-size: 13px; font-weight:700; color: var(--ink-soft); cursor:pointer;
+  }
+  .writing-actions{ display:flex; gap: 14px; align-items:center; min-height: 56px; }
+  .wact-btn{
+    padding: 14px 34px; border-radius: 16px; border:none; font-size: 18px; font-weight:800; cursor:pointer;
+  }
+  .wact-btn.primary{ background: var(--accent); color:#fff; box-shadow: 0 3px 0 var(--accent-deep); }
+  .wact-btn.primary:active{ transform: translateY(2px); box-shadow: 0 1px 0 var(--accent-deep); }
+  .wact-btn.ok{ background: var(--ok); color:#fff; }
+  .wact-btn.ng{ background: var(--ng); color:#fff; }
+  .wact-btn.ok:active, .wact-btn.ng:active{ transform: scale(.96); }
+  .reveal-answer{ font-size: 20px; color: var(--ink-soft); font-weight:700; }
+  .reveal-answer b{ color: var(--ink); font-size: 26px; }
+
   /* feedback overlay */
   .feedback{
     position:fixed; inset:0; display:none; align-items:center; justify-content:center;
@@ -229,9 +264,11 @@
     <div>
       <p>こたえかた</p>
       <div class="choice-row" id="modeChoices">
-        <div class="choice selected" data-mode="input">よみを ひらがなで にゅうりょく</div>
+        <div class="choice selected" data-mode="input">よみを にゅうりょく</div>
         <div class="choice" data-mode="quiz">4つから えらぶ</div>
-        <div class="choice" data-mode="mix">まぜまぜ</div>
+        <div class="choice" data-mode="mix">よみ まぜまぜ</div>
+        <div class="choice" data-mode="trace">なぞりがき</div>
+        <div class="choice" data-mode="write">かきとり（じぶんで ○×）</div>
       </div>
     </div>
     <button class="start-btn" id="startBtn">はじめる</button>
@@ -239,13 +276,27 @@
 
   <!-- play screen -->
   <div id="play" class="screen">
-    <div class="kanji-card" id="kanjiText">?</div>
-    <div class="answer-area">
-      <div class="kana-input-row" id="inputArea">
-        <input type="text" class="kana-input" id="answerInput" placeholder="よみかた" autocomplete="off" autocorrect="off" autocapitalize="none">
-        <button class="decide-btn" id="decideBtn">けってい</button>
+    <!-- 読みモード -->
+    <div id="readingBlock" style="display:flex; flex-direction:column; align-items:center; gap:24px;">
+      <div class="kanji-card" id="kanjiText">?</div>
+      <div class="answer-area">
+        <div class="kana-input-row" id="inputArea">
+          <input type="text" class="kana-input" id="answerInput" placeholder="よみかた" autocomplete="off" autocorrect="off" autocapitalize="none">
+          <button class="decide-btn" id="decideBtn">けってい</button>
+        </div>
+        <div class="choice4-grid" id="choiceArea" style="display:none"></div>
       </div>
-      <div class="choice4-grid" id="choiceArea" style="display:none"></div>
+    </div>
+
+    <!-- 書き取りモード -->
+    <div id="writingBlock" style="display:none; flex-direction:column; align-items:center; gap:16px; width:100%;">
+      <div class="writing-prompt" id="writingPrompt"></div>
+      <div class="canvas-wrap">
+        <div class="trace-guide" id="traceGuide"></div>
+        <canvas id="writeCanvas"></canvas>
+        <button class="clear-btn" id="clearBtn">けす</button>
+      </div>
+      <div class="writing-actions" id="writingActions"></div>
     </div>
   </div>
 
@@ -453,6 +504,7 @@ var KANJI_DATA = [{"k":"一","g":1,"r":["いち","いつ","ひと"]},{"k":"右",
       if(qMode === 'mix') qMode = Math.random() < 0.5 ? 'input' : 'quiz';
       var problem = { kanji: item.k, answer: correct, readings: item.r, mode: qMode };
       if(qMode === 'quiz'){
+        // 4択の選択肢を作る
         var distractors = pickDistractors(pool, item.r, 3);
         var options = distractors.concat([correct]);
         // シャッフル
@@ -479,10 +531,24 @@ var KANJI_DATA = [{"k":"一","g":1,"r":["いち","いつ","ひと"]},{"k":"右",
 
   function loadProblem(){
     var p = state.problems[state.index];
-    document.getElementById('kanjiText').textContent = p.kanji;
     document.getElementById('statIndex').textContent = state.index + 1;
     document.getElementById('statOk').textContent = state.ok;
     document.getElementById('statNg').textContent = state.ng;
+
+    var readingBlock = document.getElementById('readingBlock');
+    var writingBlock = document.getElementById('writingBlock');
+
+    if(p.mode === 'trace' || p.mode === 'write'){
+      readingBlock.style.display = 'none';
+      writingBlock.style.display = 'flex';
+      loadWritingProblem(p);
+      return;
+    }
+
+    // 読みモード
+    readingBlock.style.display = 'flex';
+    writingBlock.style.display = 'none';
+    document.getElementById('kanjiText').textContent = p.kanji;
 
     var inputArea = document.getElementById('inputArea');
     var choiceArea = document.getElementById('choiceArea');
@@ -503,6 +569,76 @@ var KANJI_DATA = [{"k":"一","g":1,"r":["いち","いつ","ひと"]},{"k":"右",
         btn.addEventListener('click', function(){ submitAnswer(opt); });
         choiceArea.appendChild(btn);
       });
+    }
+  }
+
+  // ---------- writing mode ----------
+  function loadWritingProblem(p){
+    clearCanvas();
+    var guide = document.getElementById('traceGuide');
+    var prompt = document.getElementById('writingPrompt');
+    var actions = document.getElementById('writingActions');
+    actions.innerHTML = '';
+
+    if(p.mode === 'trace'){
+      // なぞり書き：お手本を薄く表示、なぞって「かけた！」で次へ
+      guide.style.display = 'flex';
+      guide.textContent = p.kanji;
+      prompt.innerHTML = 'よみ：<b>' + p.answer + '</b>';
+      var doneBtn = document.createElement('button');
+      doneBtn.className = 'wact-btn primary';
+      doneBtn.textContent = 'かけた！';
+      doneBtn.addEventListener('click', function(){
+        state.ok++;
+        advanceAfterWriting();
+      });
+      actions.appendChild(doneBtn);
+    } else {
+      // かきとり（自己申告）：読みだけ見せて書く→お手本を出して○×
+      guide.style.display = 'none';
+      guide.textContent = '';
+      prompt.innerHTML = 'この よみの かんじを かこう：<b>' + p.answer + '</b>';
+      var revealBtn = document.createElement('button');
+      revealBtn.className = 'wact-btn primary';
+      revealBtn.textContent = 'こたえを みる';
+      revealBtn.addEventListener('click', function(){ revealAndJudge(p); });
+      actions.appendChild(revealBtn);
+    }
+  }
+
+  function revealAndJudge(p){
+    var guide = document.getElementById('traceGuide');
+    guide.style.display = 'flex';
+    guide.textContent = p.kanji;
+    var actions = document.getElementById('writingActions');
+    actions.innerHTML = '';
+
+    var label = document.createElement('span');
+    label.className = 'reveal-answer';
+    label.innerHTML = 'こたえ：<b>' + p.kanji + '</b>　あってた？';
+    actions.appendChild(label);
+
+    var okBtn = document.createElement('button');
+    okBtn.className = 'wact-btn ok';
+    okBtn.textContent = '○ あってた';
+    okBtn.addEventListener('click', function(){ state.ok++; advanceAfterWriting(); });
+    actions.appendChild(okBtn);
+
+    var ngBtn = document.createElement('button');
+    ngBtn.className = 'wact-btn ng';
+    ngBtn.textContent = '× まちがえた';
+    ngBtn.addEventListener('click', function(){ state.ng++; advanceAfterWriting(); });
+    actions.appendChild(ngBtn);
+  }
+
+  function advanceAfterWriting(){
+    state.index++;
+    document.getElementById('statOk').textContent = state.ok;
+    document.getElementById('statNg').textContent = state.ng;
+    if(state.index >= state.total){
+      finishGame();
+    } else {
+      loadProblem();
     }
   }
 
@@ -586,6 +722,56 @@ var KANJI_DATA = [{"k":"一","g":1,"r":["いち","いつ","ひと"]},{"k":"右",
       list.appendChild(row);
     });
   }
+
+  // ---------- write canvas ----------
+  var canvas = document.getElementById('writeCanvas');
+  var ctx = canvas.getContext('2d');
+  var drawing = false;
+  var lastX = 0, lastY = 0;
+
+  function resizeCanvas(){
+    var rect = canvas.getBoundingClientRect();
+    if(rect.width === 0) return;
+    var ratio = window.devicePixelRatio || 1;
+    canvas.width = rect.width * ratio;
+    canvas.height = rect.height * ratio;
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.lineWidth = 8;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#1D2B3A';
+  }
+  function clearCanvas(){
+    resizeCanvas();
+    ctx.save();
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.clearRect(0,0,canvas.width, canvas.height);
+    ctx.restore();
+  }
+  document.getElementById('clearBtn').addEventListener('click', clearCanvas);
+
+  function getPos(e){
+    var rect = canvas.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+  canvas.addEventListener('pointerdown', function(e){
+    drawing = true;
+    var pos = getPos(e);
+    lastX = pos.x; lastY = pos.y;
+    canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener('pointermove', function(e){
+    if(!drawing) return;
+    var pos = getPos(e);
+    ctx.beginPath();
+    ctx.moveTo(lastX, lastY);
+    ctx.lineTo(pos.x, pos.y);
+    ctx.stroke();
+    lastX = pos.x; lastY = pos.y;
+  });
+  ['pointerup','pointercancel','pointerleave'].forEach(function(ev){
+    canvas.addEventListener(ev, function(){ drawing = false; });
+  });
 
   // ---------- init ----------
   renderPlayerList();
